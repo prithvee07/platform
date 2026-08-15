@@ -18,7 +18,8 @@ public record OpenApkProperties(
         ScriptAnalyzer scriptAnalyzer,
         Workers workers,
         Email email,
-        Tos tos
+        Tos tos,
+        OAuth2 oauth2
 ) {
 
     /**
@@ -33,6 +34,22 @@ public record OpenApkProperties(
     public record Crypto(String masterKeyB64) {}
 
     public record Cors(List<String> allowedOrigins) {}
+
+    /**
+     * {@code allowedClientIds} restricts which Keycloak client an access
+     * token must have been issued to before this API accepts it — checked
+     * against the token's {@code azp} (and, as a fallback, {@code aud})
+     * claim by the custom {@code JwtDecoder} in {@link SecurityConfig}.
+     * Spring's default issuer-uri-based decoder validates signature/expiry/
+     * issuer only, so without this a valid token minted for an unrelated
+     * client in the SAME Keycloak realm (Keycloak's built-in {@code account}
+     * / {@code admin-cli} / {@code security-admin-console} clients, or any
+     * future third-party client an operator registers) would be accepted
+     * here too. Defaults to the two clients shipped in
+     * {@code realm-openapk.json}; self-hosters who rename/add clients
+     * override via {@code openapk.oauth2.allowed-client-ids}.
+     */
+    public record OAuth2(List<String> allowedClientIds) {}
 
     public record Workspace(String dir) {}
 
