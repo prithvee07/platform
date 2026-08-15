@@ -8,6 +8,13 @@ name: release-cli
 #   - jadx-worker.tar.gz           bundled JADX image (APK decompile)
 #   - ghidra-worker.tar.gz         bundled Ghidra image (native binary RE)
 #
+# Every asset above also gets a `<name>.sha256` sidecar (bare hex digest).
+# `openbin update` and the lazy worker-image fetch both fetch the sidecar
+# and verify it before installing/loading what they downloaded — those
+# paths self-replace the running binary / get `docker load`ed and run, so
+# TLS alone isn't enough to trust the bytes. Keep this in sync with any
+# renamed/added asset: a missing sidecar makes the CLI refuse to install it.
+#
 # The slim CLI tarball keeps the one-liner installer (openbin.ai/install.sh)
 # fast — it only fetches the ~10 MB binary. The worker images are large
 # (jadx ~350 MB / ghidra ~700 MB gzipped) and are downloaded lazily by the
@@ -52,6 +59,7 @@ jobs:
             --cache-to=type=gha,mode=max,scope=jadx \
             ./jadx-worker
           docker save openapk/jadx-worker:bundled-2 | gzip > jadx-worker.tar.gz
+          sha256sum jadx-worker.tar.gz | cut -d' ' -f1 > jadx-worker.tar.gz.sha256
           ls -lh jadx-worker.tar.gz
 
       # The ghidra-worker tag is a versioned cache key — bump it whenever the
@@ -67,6 +75,7 @@ jobs:
             --cache-to=type=gha,mode=max,scope=ghidra \
             ./ghidra-worker
           docker save openbin/ghidra-worker:6 | gzip > ghidra-worker.tar.gz
+          sha256sum ghidra-worker.tar.gz | cut -d' ' -f1 > ghidra-worker.tar.gz.sha256
           ls -lh ghidra-worker.tar.gz
 
       - name: Upload image artifacts
@@ -75,7 +84,9 @@ jobs:
           name: worker-images
           path: |
             jadx-worker.tar.gz
+            jadx-worker.tar.gz.sha256
             ghidra-worker.tar.gz
+            ghidra-worker.tar.gz.sha256
           retention-days: 1
 
   create-release:
@@ -147,9 +158,11 @@ jobs:
           cp cli/README.md "$pkg/"
           if [ "${{ matrix.archive }}" = "zip" ]; then
             zip -r "$pkg.zip" "$pkg/"
+            sha256sum "$pkg.zip" | cut -d' ' -f1 > "$pkg.zip.sha256"
             ls -lh "$pkg.zip"
           else
             tar czf "$pkg.tar.gz" "$pkg/"
+            sha256sum "$pkg.tar.gz" | cut -d' ' -f1 > "$pkg.tar.gz.sha256"
             ls -lh "$pkg.tar.gz"
           fi
 
@@ -162,7 +175,9 @@ jobs:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
             openbin-*.tar.gz
+            openbin-*.tar.gz.sha256
             openbin-*.zip
+            openbin-*.zip.sha256
           fail_on_unmatched_files: false
 
   attach-images:
@@ -181,7 +196,9 @@ jobs:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
             jadx-worker.tar.gz
+            jadx-worker.tar.gz.sha256
             ghidra-worker.tar.gz
+            ghidra-worker.tar.gz.sha256
           fail_on_unmatched_files: true
 
   attach-version:

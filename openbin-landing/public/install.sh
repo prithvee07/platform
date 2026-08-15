@@ -61,6 +61,23 @@ if ! curl -fSL --progress-bar "$URL" -o "$tmp/$ASSET"; then
 Is there a published release yet? See https://github.com/$REPO/releases"
 fi
 
+# Verify against the published sha256 sidecar before running anything from
+# this archive. Fail closed: no sidecar (or a mismatch) aborts the install
+# rather than trusting bytes off the wire on TLS alone.
+info "Verifying checksum..."
+if ! curl -fsSL "$URL.sha256" -o "$tmp/$ASSET.sha256"; then
+  die "could not fetch $URL.sha256 — refusing to install an unverified binary"
+fi
+expected="$(awk '{print $1}' "$tmp/$ASSET.sha256")"
+if command -v sha256sum >/dev/null 2>&1; then
+  actual="$(sha256sum "$tmp/$ASSET" | awk '{print $1}')"
+elif command -v shasum >/dev/null 2>&1; then
+  actual="$(shasum -a 256 "$tmp/$ASSET" | awk '{print $1}')"
+else
+  die "need sha256sum or shasum to verify the download"
+fi
+[ "$actual" = "$expected" ] || die "checksum mismatch for $ASSET: expected $expected, got $actual — refusing to install a tampered download"
+
 info "Extracting..."
 tar -xzf "$tmp/$ASSET" -C "$tmp"
 # Tarball extracts to openbin-<os>-<arch>/openbin — find the binary wherever

@@ -55,6 +55,22 @@ try {
     Die "download failed: $url`nIs there a published release yet? See https://github.com/$repo/releases"
   }
 
+  # Verify against the published sha256 sidecar before extracting/running
+  # anything from this archive. Fail closed: no sidecar (or a mismatch)
+  # aborts the install rather than trusting bytes off the wire on TLS alone.
+  Info 'Verifying checksum...'
+  $shaPath = Join-Path $tmp "$asset.sha256"
+  try {
+    Invoke-WebRequest -Uri "$url.sha256" -OutFile $shaPath -UseBasicParsing
+  } catch {
+    Die "could not fetch $url.sha256 — refusing to install an unverified binary"
+  }
+  $expected = (Get-Content $shaPath -Raw).Trim().Split()[0].ToLower()
+  $actual = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLower()
+  if ($actual -ne $expected) {
+    Die "checksum mismatch for $asset`: expected $expected, got $actual — refusing to install a tampered download"
+  }
+
   Info 'Extracting...'
   Expand-Archive -Path $zipPath -DestinationPath $tmp -Force
   # Zip extracts to openbin-windows-<arch>\openbin.exe — find it wherever it

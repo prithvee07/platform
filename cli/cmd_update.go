@@ -80,6 +80,14 @@ func selfUpdate() error {
 		fmt.Println("Updating openbin to the latest release ...")
 	}
 
+	// Fetch the expected digest FIRST and fail closed: if the release
+	// pipeline hasn't published a sidecar for this asset, refuse to update
+	// rather than installing an unverified binary.
+	expectedSha, err := fetchExpectedSha256(url, 30*time.Second)
+	if err != nil {
+		return fmt.Errorf("%w (refusing to install an unverified binary)", err)
+	}
+
 	client := &http.Client{Timeout: 10 * time.Minute}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -88,6 +96,17 @@ func selfUpdate() error {
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("download %s returned %d (is there a published release?)", url, resp.StatusCode)
+	}
+
+	// The slim CLI package is a small (~10 MB) archive — buffer it fully so
+	// we can verify its checksum BEFORE extracting anything from it. 200 MB
+	// cap guards against an unexpectedly huge response.
+	archive, err := io.ReadAll(io.LimitReader(resp.Body, 200<<20))
+	if err != nil {
+		return fmt.Errorf("download %s: %w", url, err)
+	}
+	if err := verifySha256(archive, expectedSha); err != nil {
+		return fmt.Errorf("%s: %w", url, err)
 	}
 
 	// Stage the new binary next to the current one so the final swap is an
@@ -102,9 +121,9 @@ func selfUpdate() error {
 	defer os.Remove(tmpName) // no-op after a successful rename
 
 	if runtime.GOOS == "windows" {
-		err = extractZipBinary(resp.Body, binName, tmp)
+		err = extractZipBinary(bytes.NewReader(archive), binName, tmp)
 	} else {
-		err = extractTarGzBinary(resp.Body, binName, tmp)
+		err = extractTarGzBinary(bytes.NewReader(archive), binName, tmp)
 	}
 	tmp.Close()
 	if err != nil {

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,6 +35,14 @@ func downloadWorkerImage(tarballName, dest string) error {
 		"Worker image not found locally — downloading %s from the latest release\n"+
 			"(first run only; cached at %s for next time)...\n", tarballName, dest)
 
+	// This tarball gets `docker load`ed and run as a container, so an
+	// unverified download is effectively arbitrary code execution. Fetch the
+	// expected digest FIRST and fail closed if the release didn't publish one.
+	expectedSha, err := fetchExpectedSha256(url, 30*time.Second)
+	if err != nil {
+		return fmt.Errorf("%w (refusing to load an unverified worker image)", err)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return fmt.Errorf("create cache dir: %w", err)
 	}
@@ -55,8 +65,11 @@ func downloadWorkerImage(tarballName, dest string) error {
 	if err != nil {
 		return fmt.Errorf("create %s: %w", part, err)
 	}
+	// Hash while streaming to disk so we never have to hold the whole
+	// (hundreds-of-MB) image in memory to verify it.
+	h := sha256.New()
 	pr := &progressReader{r: resp.Body, total: resp.ContentLength, label: tarballName}
-	if _, err := io.Copy(out, pr); err != nil {
+	if _, err := io.Copy(out, io.TeeReader(pr, h)); err != nil {
 		out.Close()
 		os.Remove(part)
 		return fmt.Errorf("download %s: %w", tarballName, err)
@@ -64,6 +77,11 @@ func downloadWorkerImage(tarballName, dest string) error {
 	if err := out.Close(); err != nil {
 		os.Remove(part)
 		return err
+	}
+	if gotSha := hex.EncodeToString(h.Sum(nil)); gotSha != expectedSha {
+		os.Remove(part)
+		return fmt.Errorf("%s: checksum mismatch: expected %s, got %s — refusing to load a tampered image",
+			tarballName, expectedSha, gotSha)
 	}
 	if err := os.Rename(part, dest); err != nil {
 		os.Remove(part)
