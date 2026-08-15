@@ -75,6 +75,14 @@ openapk:
     allowed-origins:
       - http://localhost:5173  # openapk-frontend dev
       - http://localhost:5174  # openbin-frontend dev
+  oauth2:
+    # Access tokens must be azp'd (or, failing that, aud'd) to one of these
+    # Keycloak client IDs — see OpenApkProperties.OAuth2 for why. Matches the
+    # two clients in realm-openapk.json; add to this list (env override) if
+    # a self-hosted deployment registers additional trusted clients.
+    allowed-client-ids:
+      - openapk-frontend
+      - openbin-cli
   workspace:
     # Where uploaded APKs and JADX-decompiled output are stored on disk.
     # Resolved relative to the working directory if not absolute.
